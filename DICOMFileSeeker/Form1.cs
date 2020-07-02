@@ -1,17 +1,20 @@
 ﻿using Dicom;
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
 using System.IO;
 using System.Security;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace DICOMFileSeeker
 {
     //TODO!+
     // Two main tasks still need to be done.
-    // (1) The actual search must be made asynchronous.
+    // (1) The actual search must be made asynchronous - DONE!
     // (2) The DICOM Tag Input controls must allow the user to specify a value.
+    // ...After this, perhaps we could make a cache of files with their dicom tags and timestamps.
 
     public partial class Form1 : Form
     {
@@ -64,7 +67,7 @@ namespace DICOMFileSeeker
             lblStatusMessage = new Label
             {
                 Location = new Point(leftStart, 70),
-                Size = new Size(400, 20),
+                Size = new Size(700, 20),
                 ForeColor = Color.Black,
                 Text = "Status: waiting for input."
             };
@@ -80,7 +83,7 @@ namespace DICOMFileSeeker
             tbSearchResults = new TextBox()
             {
                 Location = new Point(280, 100),
-                Size = new Size(400, 600),
+                Size = new Size(400, 400),
                 Multiline = true,
                 Enabled = false,
                 ScrollBars = ScrollBars.Both
@@ -88,70 +91,42 @@ namespace DICOMFileSeeker
             this.Controls.Add(tbSearchResults);
         }
 
-        private void BtStartSearching_Click(object sender, EventArgs e)
+        private async void BtStartSearching_Click(object sender, EventArgs e)
         {
             tbSearchResults.Clear();
             string directoryToSearch = tbDirectoryToSearch.Text;
 
-            //TODO!+ search asynchronously.
-
             try
             {
                 lblStatusMessage.ForeColor = Color.Black;
-                lblStatusMessage.Text = $"Status: searching directory {tbDirectoryToSearch.Text}.";
-                
-                var filenames = Directory.EnumerateFiles(directoryToSearch, "*.dcm", SearchOption.AllDirectories);
-                Dicom.DicomTag tag1 = tagInput1.Get();
-                Dicom.DicomTag tag2 = tagInput2.Get();
-                Dicom.DicomTag tag3 = tagInput3.Get();
-                foreach (string filename in filenames)
-                {
-                    //TODO!~ Use OpenAsync instead of Open.
-                    //TODO!+ If the file is not a DICOM file, DicomFile.Open (and DicomFile.OpenAsync) throws an Exception.
-                    // We catch that Exception. But if we're using Async, we should add  a "finally" to deal with this.
+                lblStatusMessage.Text = $"Status: searching directory {tbDirectoryToSearch.Text}";
 
-                    try
-                    {
-                        Dicom.DicomFile dicomFile = Dicom.DicomFile.Open(filename, Dicom.FileReadOption.Default); //TODO?~ Make sure we ONLY read the tags! Dicom.FileReadOption comes in here.
-                        bool noTagsSpecified = (tag1 == null && tag2 == null && tag3 == null);
-                        bool tag1Present = tag1 != null && dicomFile.Dataset.Contains(tag1);
-                        bool tag2Present = tag2 != null && dicomFile.Dataset.Contains(tag2);
-                        bool tag3Present = tag3 != null && dicomFile.Dataset.Contains(tag3);
-                        if (noTagsSpecified || tag1Present || tag2Present || tag3Present)
-                        {
-                            tbSearchResults.Text += (filename + Environment.NewLine);
-                        }
-                    }
-                    catch (DicomFileException exc)
-                    {
-                        //TODO!+
-                    }
-                }
+                await DoSearchAsync(directoryToSearch);
 
-                //TODO!~ When making this async, obviously this status message should come after the
-                // asynchronous search is finished...
+                //TODO!+ ONLY set status to "Search complete" if there are no errors.
+                // ...or, perhaps, make a separate place for error messages...
                 lblStatusMessage.ForeColor = Color.Black;
                 lblStatusMessage.Text = "Status: search complete!";
             }
-            catch (ArgumentNullException exc)
+            catch (ArgumentNullException)
             {
                 lblStatusMessage.ForeColor = Color.Red;
                 lblStatusMessage.Text = "Error: directory to search is not specified.";
             }
-            catch (ArgumentOutOfRangeException exc)
+            catch (ArgumentOutOfRangeException)
             {
                 lblStatusMessage.ForeColor = Color.Red;
                 lblStatusMessage.Text = "Error: unclear what directory to search.";
             }
-            catch (ArgumentException exc)
+            catch (ArgumentException)
             {
                 lblStatusMessage.ForeColor = Color.Red;
                 lblStatusMessage.Text = "Error: unclear what directory to search.";
             }
-            catch (DirectoryNotFoundException exc)
+            catch (DirectoryNotFoundException)
             {
                 lblStatusMessage.ForeColor = Color.Red;
-                lblStatusMessage.Text = $"Error: directory {tbDirectoryToSearch.Text} not found.";
+                lblStatusMessage.Text = $"Error: could not find directory {tbDirectoryToSearch.Text}";
             }
             catch (PathTooLongException)
             {
@@ -161,17 +136,55 @@ namespace DICOMFileSeeker
             catch (IOException)
             {
                 lblStatusMessage.ForeColor = Color.Red;
-                lblStatusMessage.Text = $"Error: failed to read directory {tbDirectoryToSearch.Text} or files within it.";
+                lblStatusMessage.Text = $"Error: failed to read directory or files at {tbDirectoryToSearch.Text}";
             }
             catch (UnauthorizedAccessException)
             {
                 lblStatusMessage.ForeColor = Color.Red;
-                lblStatusMessage.Text = $"Error: access refused for directory {tbDirectoryToSearch.Text} or files within it.";
+                lblStatusMessage.Text = $"Error: access refused for directory or files at {tbDirectoryToSearch.Text}";
             }
             catch (SecurityException)
             {
                 lblStatusMessage.ForeColor = Color.Red;
-                lblStatusMessage.Text = $"Error: security error while reading directory {tbDirectoryToSearch.Text} or files within it.";
+                lblStatusMessage.Text = $"Error: security error while reading directory or files at {tbDirectoryToSearch.Text}";
+            }
+        }
+
+
+        private async Task DoSearchAsync(string directoryToSearch)
+        {
+            await Task.Run(() => DoSearch(directoryToSearch));
+        }
+
+        private void DoSearch(string directoryToSearch)
+        {
+            var filenames = Directory.EnumerateFiles(directoryToSearch, "*.dcm", SearchOption.AllDirectories);
+            Dicom.DicomTag tag1 = tagInput1.Get();
+            Dicom.DicomTag tag2 = tagInput2.Get();
+            Dicom.DicomTag tag3 = tagInput3.Get();
+            foreach (string filename in filenames)
+            {
+                //TODO!~ Use OpenAsync instead of Open.
+                //TODO!+ If the file is not a DICOM file, DicomFile.Open (and DicomFile.OpenAsync) throws an Exception.
+                // We catch that Exception. But if we're using Async, we should add  a "finally" to deal with this.
+
+                try
+                {
+                    Dicom.DicomFile dicomFile = Dicom.DicomFile.Open(filename, Dicom.FileReadOption.Default); //TODO?~ Make sure we ONLY read the tags! Dicom.FileReadOption comes in here.
+                    bool noTagsSpecified = (tag1 == null && tag2 == null && tag3 == null);
+                    bool tag1Present = tag1 != null && dicomFile.Dataset.Contains(tag1);
+                    bool tag2Present = tag2 != null && dicomFile.Dataset.Contains(tag2);
+                    bool tag3Present = tag3 != null && dicomFile.Dataset.Contains(tag3);
+                    if (noTagsSpecified || tag1Present || tag2Present || tag3Present)
+                    {
+                        tbSearchResults.Text += (filename + Environment.NewLine);
+                    }
+                }
+                catch (DicomFileException exc)
+                {
+                    lblStatusMessage.ForeColor = Color.Red;
+                    lblStatusMessage.Text = $"Error: tried to open a file that was not a DICOM file.";
+                }
             }
         }
     }
