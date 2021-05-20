@@ -23,6 +23,28 @@ namespace DICOMFileSeeker
         private Label lblStatusMessage;
         private DicomTagInputControl tagInput1, tagInput2, tagInput3;
 
+
+        internal enum StatusCode { Unstarted, Searching, Error, Finished };
+
+        internal StatusCode statusCode = StatusCode.Unstarted;
+
+        internal void UpdateStatus(Label lbl, StatusCode statusCode, string message)
+        {
+            this.statusCode = statusCode;
+            lbl.Invoke((MethodInvoker) delegate
+            {
+                if (statusCode == StatusCode.Error)
+                {
+                    lbl.ForeColor = Color.Red;
+                }
+                else
+                {
+                    lbl.ForeColor = Color.Black;
+                }
+                lbl.Text = message;
+            });
+        }
+
         public Form1()
         {
             InitializeComponent();
@@ -77,8 +99,8 @@ namespace DICOMFileSeeker
             int topOfTagBox = 100;
 
             tagInput1 = new DicomTagInputControl(this, leftSideOfTagBox, topOfTagBox);
-            tagInput2 = new DicomTagInputControl(this, leftSideOfTagBox, topOfTagBox + 100);
-            tagInput3 = new DicomTagInputControl(this, leftSideOfTagBox, topOfTagBox + 200);
+            tagInput2 = new DicomTagInputControl(this, leftSideOfTagBox, topOfTagBox + 125);
+            tagInput3 = new DicomTagInputControl(this, leftSideOfTagBox, topOfTagBox + 250);
 
             tbSearchResults = new TextBox()
             {
@@ -98,55 +120,46 @@ namespace DICOMFileSeeker
 
             try
             {
-                lblStatusMessage.ForeColor = Color.Black;
-                lblStatusMessage.Text = $"Status: searching directory {tbDirectoryToSearch.Text}";
+                UpdateStatus(lblStatusMessage, StatusCode.Searching, "searching directory");
 
                 await DoSearchAsync(directoryToSearch);
 
-                //TODO!+ ONLY set status to "Search complete" if there are no errors.
-                // ...or, perhaps, make a separate place for error messages...
-                lblStatusMessage.ForeColor = Color.Black;
-                lblStatusMessage.Text = "Status: search complete!";
+                if (statusCode != StatusCode.Error)
+                {
+                    UpdateStatus(lblStatusMessage, StatusCode.Finished, "Status: search complete!");
+                }
             }
             catch (ArgumentNullException)
             {
-                lblStatusMessage.ForeColor = Color.Red;
-                lblStatusMessage.Text = "Error: directory to search is not specified.";
+                UpdateStatus(lblStatusMessage, StatusCode.Error, "Error: directory to search is not specified.");
             }
             catch (ArgumentOutOfRangeException)
             {
-                lblStatusMessage.ForeColor = Color.Red;
-                lblStatusMessage.Text = "Error: unclear what directory to search.";
+                UpdateStatus(lblStatusMessage, StatusCode.Error, "Error: unclear what directory to search.");
             }
             catch (ArgumentException)
             {
-                lblStatusMessage.ForeColor = Color.Red;
-                lblStatusMessage.Text = "Error: unclear what directory to search.";
+                UpdateStatus(lblStatusMessage, StatusCode.Error, "Error: unclear what directory to search.");
             }
             catch (DirectoryNotFoundException)
             {
-                lblStatusMessage.ForeColor = Color.Red;
-                lblStatusMessage.Text = $"Error: could not find directory {tbDirectoryToSearch.Text}";
+                UpdateStatus(lblStatusMessage, StatusCode.Error, $"Error: could not find directory {tbDirectoryToSearch.Text}");
             }
             catch (PathTooLongException)
             {
-                lblStatusMessage.ForeColor = Color.Red;
-                lblStatusMessage.Text = "Error: directory path too long.";
+                UpdateStatus(lblStatusMessage, StatusCode.Error, "Error: directory path too long.");
             }
             catch (IOException)
             {
-                lblStatusMessage.ForeColor = Color.Red;
-                lblStatusMessage.Text = $"Error: failed to read directory or files at {tbDirectoryToSearch.Text}";
+                UpdateStatus(lblStatusMessage, StatusCode.Error, $"Error: failed to read directory or files at {tbDirectoryToSearch.Text}");
             }
             catch (UnauthorizedAccessException)
             {
-                lblStatusMessage.ForeColor = Color.Red;
-                lblStatusMessage.Text = $"Error: access refused for directory or files at {tbDirectoryToSearch.Text}";
+                UpdateStatus(lblStatusMessage, StatusCode.Error, $"Error: access refused for directory or files at {tbDirectoryToSearch.Text}");
             }
             catch (SecurityException)
             {
-                lblStatusMessage.ForeColor = Color.Red;
-                lblStatusMessage.Text = $"Error: security error while reading directory or files at {tbDirectoryToSearch.Text}";
+                UpdateStatus(lblStatusMessage, StatusCode.Error, $"Error: security error while reading directory or files at {tbDirectoryToSearch.Text}");
             }
         }
 
@@ -156,9 +169,21 @@ namespace DICOMFileSeeker
             await Task.Run(() => DoSearch(directoryToSearch));
         }
 
+
         private void DoSearch(string directoryToSearch)
         {
-            var filenames = Directory.EnumerateFiles(directoryToSearch, "*.dcm", SearchOption.AllDirectories);
+            IEnumerable<string> filenames = new List<string>();
+            try
+            {
+                filenames = Directory.EnumerateFiles(directoryToSearch, "*.dcm", SearchOption.AllDirectories);
+            }
+            catch (DirectoryNotFoundException)
+            {
+                string errorMsg = $"Error: directory {directoryToSearch} not found.";
+                UpdateStatus(lblStatusMessage, StatusCode.Error, errorMsg);
+                return;
+            }
+
             Dicom.DicomTag tag1 = tagInput1.Get();
             Dicom.DicomTag tag2 = tagInput2.Get();
             Dicom.DicomTag tag3 = tagInput3.Get();
@@ -171,19 +196,32 @@ namespace DICOMFileSeeker
                 try
                 {
                     Dicom.DicomFile dicomFile = Dicom.DicomFile.Open(filename, Dicom.FileReadOption.Default); //TODO?~ Make sure we ONLY read the tags! Dicom.FileReadOption comes in here.
+                    
                     bool noTagsSpecified = (tag1 == null && tag2 == null && tag3 == null);
+                    
                     bool tag1Present = tag1 != null && dicomFile.Dataset.Contains(tag1);
                     bool tag2Present = tag2 != null && dicomFile.Dataset.Contains(tag2);
                     bool tag3Present = tag3 != null && dicomFile.Dataset.Contains(tag3);
+
+                    //TODO!+ Adding stuff for finding a file based on SOP Class UID - DICOM Tag (0008,0016).
+                    //TODO!~ Use the Tag's Value Representation to determine the type of the returned value.
+                    if (tag1 != null)
+                    {
+                        object val1 = dicomFile.Dataset.GetValue<object>(tag1, 0);
+                    }
+
                     if (noTagsSpecified || tag1Present || tag2Present || tag3Present)
                     {
-                        tbSearchResults.Text += (filename + Environment.NewLine);
+                        tbSearchResults.Invoke((MethodInvoker)delegate 
+                        {
+                            tbSearchResults.Text += (filename + Environment.NewLine); 
+                        });
                     }
                 }
-                catch (DicomFileException exc)
+                catch (DicomFileException)
                 {
-                    lblStatusMessage.ForeColor = Color.Red;
-                    lblStatusMessage.Text = $"Error: tried to open a file that was not a DICOM file.";
+                    string errMsg = $"Error: tried to open a file that was not a DICOM file.";
+                    UpdateStatus(lblStatusMessage, StatusCode.Error, errMsg);
                 }
             }
         }
@@ -197,6 +235,7 @@ namespace DICOMFileSeeker
     {
         private TextBox tbDicomTagGroup;
         private TextBox tbDicomTagElement;
+        private TextBox tbDicomVRValue;
 
         /// <summary>
         /// Create a new GroupBox with DICOM Tag controls, and place it on the parent Control.
@@ -242,7 +281,20 @@ namespace DICOMFileSeeker
             };
             gbDicomTag.Controls.Add(tbDicomTagElement);
 
-            //TODO!+ Add a control for the contents that the tag should have.
+            // DICOM element: value
+            Label lblDicomVRValue = new Label
+            {
+                Text = "Value:",
+                Location = new Point(10, 80),
+                Size = new Size(160, 20)
+            };
+            gbDicomTag.Controls.Add(lblDicomVRValue);
+            tbDicomVRValue = new TextBox
+            {
+                Location = new Point(160, 80),
+                Size = new Size(40, 80)
+            };
+            gbDicomTag.Controls.Add(tbDicomVRValue);
 
             // Finally, add the GroupBox to the parent control.
             parent.Controls.Add(gbDicomTag);
