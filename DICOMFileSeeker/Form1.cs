@@ -189,14 +189,16 @@ namespace DICOMFileSeeker
             Dicom.DicomTag tag3 = tagInput3.Get();
             foreach (string filename in filenames)
             {
+                //TODO?~ Find out why some machines insist that we install .NET Core, even though this thing is published as standalone.
+                // Is our reliance on fo-dicom the reason? fo-dicom is (apparently) a PCL, does that mean it's standalone?
+
                 //TODO!~ Use OpenAsync instead of Open.
                 //TODO!+ If the file is not a DICOM file, DicomFile.Open (and DicomFile.OpenAsync) throws an Exception.
                 // We catch that Exception. But if we're using Async, we should add  a "finally" to deal with this.
 
                 try
                 {
-                    Dicom.DicomFile dicomFile = Dicom.DicomFile.Open(filename, Dicom.FileReadOption.Default); //TODO?~ Make sure we ONLY read the tags! Dicom.FileReadOption comes in here.
-                    
+                    DicomFile dicomFile = DicomFile.Open(filename, Dicom.FileReadOption.Default); //TODO?~ Make sure we ONLY read the tags! Dicom.FileReadOption comes in here.                    
                     bool noTagsSpecified = (tag1 == null && tag2 == null && tag3 == null);
                     
                     bool tag1Present = tag1 != null && dicomFile.Dataset.Contains(tag1);
@@ -205,12 +207,33 @@ namespace DICOMFileSeeker
 
                     //TODO!+ Adding stuff for finding a file based on SOP Class UID - DICOM Tag (0008,0016).
                     //TODO!~ Use the Tag's Value Representation to determine the type of the returned value.
+                    bool secondaryCaptureFound = false;
                     if (tag1 != null)
                     {
                         object val1 = dicomFile.Dataset.GetValue<object>(tag1, 0);
+
+                        //For now: just go with  strings...
+                        string val1str = val1.ToString();
+                        if (val1str.StartsWith("1.2.840.10008.5.1.4.1.1.7"))
+                        {
+                            secondaryCaptureFound = true;
+                        }
+
+                        // Also for now: just go with secondary capture.
+                            /*
+                             * Secondary Capture Image Storage:
+                             * 1.2.840.10008.5.1.4.1.1.7
+                             * Secondary Capture Image for multiframes:
+                             * 1.2.840.10008.5.1.4.1.1.7.1
+                             * 1.2.840.10008.5.1.4.1.1.7.2
+                             * 1.2.840.10008.5.1.4.1.1.7.3
+                             * 1.2.840.10008.5.1.4.1.1.7.4
+                             */
+
                     }
 
-                    if (noTagsSpecified || tag1Present || tag2Present || tag3Present)
+                    //if (noTagsSpecified || tag1Present || tag2Present || tag3Present)
+                    if (tag1Present && secondaryCaptureFound)
                     {
                         tbSearchResults.Invoke((MethodInvoker)delegate 
                         {
